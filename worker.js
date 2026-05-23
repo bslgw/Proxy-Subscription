@@ -1,7 +1,7 @@
 // ==========================================
 // 🔒 安全配置：請更換為你的私密暗號
 // ==========================================
-const SECRETPASSWORD = "bbsok828"; 
+const SECRETPASSWORD = "888"; 
 
 export default {
   async fetch(request, env, ctx) {
