@@ -15,10 +15,10 @@ export default {
       try { return link.split('://')[0].toLowerCase(); } catch (e) { return 'unknown'; }
     };
 
-    // --- 路由 1: 訂閱接口 ---
+    // --- 路由 1: 訂閱接口 (供客戶端使用) ---
     if (url.pathname === '/sub') {
       const rawData = await env.NODES_STORE.get('nodes_list');
-      const nodes = rawData ? JSON.parse(rawData) : [];
+      let nodes = rawData ? JSON.parse(rawData) : [];
       nodes.sort((a, b) => getProtocol(a.link).localeCompare(getProtocol(b.link)));
       return new Response(nodes.map(n => n.link).join('\n'), {
         headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' },
@@ -31,20 +31,19 @@ export default {
         const { id, link, customName } = await request.json();
         if (!link) return new Response("鏈接不能為空", { status: 400 });
 
-        let processedLink = link.trim().split('#')[0];
-        if (customName) processedLink += `#${customName.trim()}`;
+        let processedLink = link.trim();
+        if (processedLink.includes('#')) processedLink = processedLink.split('#')[0];
+        if (customName) processedLink = `${processedLink}#${customName.trim()}`;
 
         const rawData = await env.NODES_STORE.get('nodes_list');
         let nodes = rawData ? JSON.parse(rawData) : [];
 
         if (id) {
-          // 修改邏輯：尋找現有 ID 並替換
           const index = nodes.findIndex(n => n.id === id);
           if (index !== -1) {
             nodes[index] = { id, originalName: customName || '未命名', link: processedLink };
           }
         } else {
-          // 新增邏輯
           nodes.push({ id: Date.now().toString(), originalName: customName || '未命名', link: processedLink });
         }
 
@@ -78,10 +77,11 @@ export default {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Dae 節點管理(含修改功能)</title>
+      <title>Dae 節點管理系統</title>
       <style>
         body { font-family: system-ui; background: #f4f7f9; max-width: 700px; margin: 20px auto; padding: 0 15px; color: #333; }
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 20px; }
+        .sub-url-box { background: #fffbe6; padding: 12px; border: 1px dashed #ffe58f; border-radius: 6px; font-family: monospace; font-size: 13px; word-break: break-all; margin-top: 10px; color: #856404; font-weight: bold; }
         .form-group { margin-bottom: 12px; }
         label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 5px; }
         input, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
@@ -97,20 +97,26 @@ export default {
         .btn-sm { padding: 4px 8px; font-size: 12px; flex: none; }
         .btn-edit { background: #34a853; color: white; }
         .btn-del { background: #ea4335; color: white; }
-        .group-tag { background: #f8f9fa; padding: 5px 10px; font-weight: bold; font-size: 12px; border-left: 3px solid #1a73e8; margin: 15px 0 5px; }
+        .group-tag { background: #f8f9fa; padding: 5px 10px; font-weight: bold; font-size: 12px; border-left: 3px solid #1a73e8; margin: 15px 0 5px; text-transform: uppercase; }
       </style>
     </head>
     <body>
       <div class="card">
-        <h2 id="formTitle">➕ 添加新節點</h2>
+        <h2 style="margin-top:0; color:#1a73e8;">🔗 你的專屬訂閱鏈接</h2>
+        <p style="font-size:13px; color:#666;">將下方地址複製到你的客戶端 (如 Dae/Daed)：</p>
+        <div class="sub-url-box">${url.origin}/sub?token=${SECRETPASSWORD}</div>
+      </div>
+
+      <div class="card">
+        <h2 id="formTitle" style="margin-top:0;">➕ 添加新節點</h2>
         <input type="hidden" id="nodeId">
         <div class="form-group">
           <label>節點鏈接</label>
           <textarea id="nodeLink" rows="2" placeholder="vless://..."></textarea>
         </div>
         <div class="form-group">
-          <label>顯示名稱</label>
-          <input type="text" id="nodeName" placeholder="例如：香港 01">
+          <label>備註名稱</label>
+          <input type="text" id="nodeName" placeholder="不填則保留鏈接內名稱">
         </div>
         <div class="btn-group">
           <button class="btn-primary" onclick="saveNode()" id="saveBtn">保存節點</button>
@@ -119,9 +125,10 @@ export default {
       </div>
 
       <div class="card">
-        <h2>📋 節點列表</h2>
+        <h2 style="margin-top:0;">📋 已存節點 (${currentNodes.length})</h2>
+        ${Object.keys(groupedNodes).length === 0 ? '<p style="text-align:center;color:#999;font-size:14px;">暫無節點，請在上方添加</p>' : ''}
         ${Object.entries(groupedNodes).map(([proto, items]) => `
-          <div class="group-tag">${proto.toUpperCase()} (${items.length})</div>
+          <div class="group-tag">${proto}</div>
           ${items.map(n => `
             <div class="node-item">
               <div class="node-info">
@@ -142,10 +149,8 @@ export default {
 
         function editNode(node) {
           document.getElementById('nodeId').value = node.id;
-          // 移除鏈接結尾的 #名稱，方便用戶修改
           document.getElementById('nodeLink').value = node.link.split('#')[0];
           document.getElementById('nodeName').value = node.originalName;
-          
           document.getElementById('formTitle').innerText = "📝 修改節點";
           document.getElementById('saveBtn').innerText = "確認修改";
           document.getElementById('cancelBtn').style.display = "block";
@@ -166,18 +171,20 @@ export default {
           const link = document.getElementById('nodeLink').value;
           const customName = document.getElementById('nodeName').value;
           if(!link) return alert("請填寫鏈接");
-
-          await fetch('/api/save?token=' + token, {
+          const res = await fetch('/api/save?token=' + token, {
             method: 'POST',
             body: JSON.stringify({ id, link, customName })
           });
-          location.reload();
+          if(res.ok) location.reload();
         }
 
         async function deleteNode(id) {
-          if(confirm('確定刪除嗎？')) {
-            await fetch('/api/delete?token=' + token, { method: 'POST', body: JSON.stringify({ id }) });
-            location.reload();
+          if(confirm('確定要刪除這個節點嗎？')) {
+            const res = await fetch('/api/delete?token=' + token, { 
+              method: 'POST', 
+              body: JSON.stringify({ id }) 
+            });
+            if(res.ok) location.reload();
           }
         }
       </script>
