@@ -1,68 +1,29 @@
-name: Build TCP-Brutal
-on: 
+name: Build OpenWrt Package
+
+on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout OpenWrt Official
+      # 1. 检出当前仓库代码
+      - name: Checkout current repository
         uses: actions/checkout@v4
-        with:
-          repository: openwrt/openwrt
-          ref: v23.05.5 # 建议选择稳定版分支，确保内核兼容性
 
-      - name: Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3-distutils
-
-      - name: Initialize Feeds
-        run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Inject TCP-Brutal
+      # 2. 检出外部依赖仓库 (sbwml/openwrt-tcp-brutal)
+      - name: Checkout external repository
         uses: actions/checkout@v4
         with:
           repository: sbwml/openwrt-tcp-brutal
-          path: package/tcp-brutal
+          path: package/tcp-brutal  # 这里指定你想要的路径
+          token: ${{ secrets.MY_PAT }} # 使用你在 Settings 中添加的 Secret
 
-      - name: Re-install Feeds for Dependencies
+      # 3. 后续构建步骤
+      - name: Build project
         run: |
-          # 这一步非常重要：更新完 feeds 且加入插件后，必须重新安装
-          # 这样系统才会扫描到新加入的 package/tcp-brutal 目录并解决依赖
-          ./scripts/feeds install -a
-
-      - name: Configure Build
-        run: |
-          # 生成基础配置
-          make defconfig
-          
-          # 开启 tcp-brutal 及其内核模块
-          # 注意：这里的名称必须与 tcp-brutal 仓库 Makefile 内定义的 PKG_NAME 一致
-          echo "CONFIG_PACKAGE_kmod-tcp-brutal=m" >> .config
-          echo "CONFIG_PACKAGE_tcp-brutal=m" >> .config
-          
-          # 更新配置补全依赖
-          make defconfig
-
-      - name: Compile
-        run: |
-          # 使用 V=s 可以输出详细日志，方便如果再次报错时排查
-          # 使用 -j$(nproc) 充分利用 GitHub Actions 的 CPU 资源
-          make package/tcp-brutal/compile V=s -j$(nproc)
-
-      - name: Collect IPK
-        run: |
-          # 创建存放结果的目录
-          mkdir -p bin/ipk_output
-          # 递归查找所有生成的 ipk 文件并复制到输出目录
-          find bin/packages -name "*.ipk" -exec cp {} bin/ipk_output/ \;
-          ls -lh bin/ipk_output/
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: tcp-brutal-ipk
-          path: bin/ipk_output/*.ipk
+          echo "Building..."
+          # 你的构建命令
+          ls -R package/tcp-brutal
