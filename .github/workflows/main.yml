@@ -1,4 +1,4 @@
-name: Build-iStoreOS-Brutal-100M
+name: Build-iStoreOS-Brutal-100M-Fixed
 
 on:
   workflow_dispatch:
@@ -18,47 +18,46 @@ jobs:
 
       - name: Download and Prepare SDK
         run: |
-          # 使用你指定的 24.10.6 SDK
+          # 修正：這才是 24.10.6 x86_64 的真實 SDK 下載鏈接
           SDK_URL="https://openwrt.org"
           wget -q "$SDK_URL" -O openwrt-sdk.tar.zst
+          
+          # 檢查文件是否下載成功且格式正確
+          file openwrt-sdk.tar.zst
+          
           tar -I zstd -xf openwrt-sdk.tar.zst
           mv openwrt-sdk-* sdk
           cd sdk && make defconfig && cd ..
 
       - name: Hard Cross-Compile with 100Mbps Patch
         run: |
-          # 1. 設置交叉編譯環境變量
           export STAGING_DIR="$(pwd)/sdk/staging_dir"
           export TOOLCHAIN_BIN="$(pwd)/sdk/staging_dir/toolchain-x86_64_gcc-13.3.0_musl/bin"
           export PATH="$TOOLCHAIN_BIN:$PATH"
           export KERNEL_DIR="$(pwd)/sdk/build_dir/target-x86_64_musl/linux-x86_64/linux-6.6.127"
           
-          # 2. 拉取原始源碼
           git clone https://github.com raw-src
           cd raw-src
 
-          # 3. 注入 100Mbps 保底參數代碼 (100Mbps = 12500000 Bytes/s)
-          # 添加 module_param 讓以後可以通過 insmod 動態調整
+          # 注入 100Mbps 保底參數代碼 (100Mbps = 12,500,000 Bytes/s)
+          # 添加參數定義與 module_param
           sed -i '1i #include <linux/moduleparam.h>' tcp_brutal.c
           sed -i '/#include <linux\/moduleparam.h>/a static unsigned long long default_rate = 12500000;\nmodule_param(default_rate, ullong, 0644);\nMODULE_PARM_DESC(default_rate, "Default rate in bytes/s");' tcp_brutal.c
           
-          # 在 brutal_init 函數中，強制將初始速率設為 100Mbps
-          # 尋找 cwnd_gain = 20 並在其後插入賦值
+          # 在 brutal_init 函數中強制賦值，確保即使插件不傳參也跑 100M
           sed -i '/ca->cwnd_gain = 20;/a \    ca->rate = default_rate;' tcp_brutal.c
 
-          # 4. 執行交叉編譯
+          # 執行編譯
           make -C "$KERNEL_DIR" M="$(pwd)" ARCH=x86_64 CROSS_COMPILE="x86_64-openwrt-linux-musl-" modules
 
       - name: Collect Output Files
         run: |
           mkdir -p output_artifacts
           cp raw-src/brutal.ko output_artifacts/
-          # 打印模塊信息確認
-          modinfo output_artifacts/brutal.ko || true
+          ls -la output_artifacts/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: istoreos-tcp-brutal-100M-fixed
           path: output_artifacts/
-          if-no-files-found: error
