@@ -7,30 +7,34 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev libelf-dev swig
 
-      - name: Download and Setup SDK
+      - name: Setup SDK
         run: |
-          # 必须替换为你确认属于 6.6.127 内核的 SDK 链接
-          SDK_URL="https://downloads.archive.openwrt.org/snapshots/targets/x86/64/openwrt-sdk-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
+          # 【必须替换】请将此链接替换为你在浏览器中验证过、能正常下载的官网真实链接
+          # 错误：https://downloads.archive.openwrt.org/... (不存在)
+          # 正确示例：https://downloads.openwrt.org/releases/23.05.3/targets/x86/64/openwrt-sdk-23.05.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          SDK_URL="https://downloads.openwrt.org/YOUR_CONFIRMED_PATH/openwrt-sdk-xxxx.tar.xz"
+          
           wget "$SDK_URL" -O sdk.tar.xz
           tar -xf sdk.tar.xz --strip-components=1
 
-      - name: Prepare TCP-Brutal
+      - name: Prepare Feeds
         run: |
-          # 只增加这一个 feed，保留 SDK 默认配置，这是最保险的
+          # 确保 feeds 基础配置正确
           echo "src-git tcp_brutal https://github.com/haruue-net/openwrt-tcp-brutal.git;master" >> feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install tcp-brutal
 
       - name: Compile
         run: |
-          # 清除可能存在的旧编译缓存
-          make clean
-          # 编译模块
+          make defconfig
           make package/feeds/tcp_brutal/tcp-brutal/compile V=s
 
       - name: Upload Artifacts
