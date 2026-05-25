@@ -17,17 +17,22 @@ jobs:
 
       - name: Setup SDK
         run: |
-          # 【必须替换】请将此链接替换为你在浏览器中验证过、能正常下载的官网真实链接
-          # 错误：https://downloads.archive.openwrt.org/... (不存在)
-          # 正确示例：https://downloads.openwrt.org/releases/23.05.3/targets/x86/64/openwrt-sdk-23.05.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          SDK_URL="https://downloads.openwrt.org/YOUR_CONFIRMED_PATH/openwrt-sdk-xxxx.tar.xz"
+          # 自动获取 x86-64 架构下最新版本 SDK 的 URL
+          # 该指令通过官网 index 获取文件列表，确保找到真实存在的文件
+          BASE_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/"
+          SDK_FILE=$(curl -s $BASE_URL | grep -o 'openwrt-sdk-.*-x86-64_.*.tar.xz' | head -n 1)
           
-          wget "$SDK_URL" -O sdk.tar.xz
-          tar -xf sdk.tar.xz --strip-components=1
+          if [ -z "$SDK_FILE" ]; then
+            echo "Error: 未找到 SDK 文件"
+            exit 1
+          fi
+          
+          echo "Downloading $SDK_FILE ..."
+          wget "$BASE_URL$SDK_FILE"
+          tar -xf "$SDK_FILE" --strip-components=1
 
       - name: Prepare Feeds
         run: |
-          # 确保 feeds 基础配置正确
           echo "src-git tcp_brutal https://github.com/haruue-net/openwrt-tcp-brutal.git;master" >> feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install tcp-brutal
