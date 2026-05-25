@@ -1,64 +1,63 @@
-name: Build OpenWrt x86 with TCP Brutal
+name: Build TCP Brutal Kernel Module Only (x86_64 - 6.6)
 
 on:
-  workflow_dispatch:  # 手动触发
-    inputs:
-      openwrt_branch:
-        description: 'OpenWrt branch/tag (e.g. v24.10.6 or openwrt-24.10)'
-        required: true
-        default: 'v24.10.6'  # 当前支持 6.6.127 的稳定分支/版本
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04  # 或 ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout OpenWrt
+      - name: 检出 OpenWrt 源码 (v24.10)
         uses: actions/checkout@v4
         with:
           repository: openwrt/openwrt
-          ref: ${{ github.event.inputs.openwrt_branch || 'v24.10.6' }}
+          ref: v24.10.6
           fetch-depth: 1
 
-      - name: Update feeds
+      - name: 更新 feeds 并添加 TCP Brutal
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Add TCP Brutal package feed
-        run: |
-          # 添加 brutal 包（来自 sbwml）
+          # 添加 Brutal 模块源
           cat >> feeds.conf.default << EOF
           src-git tcp_brutal https://github.com/sbwml/package_kernel_tcp-brutal.git
           EOF
           ./scripts/feeds update tcp_brutal
           ./scripts/feeds install -a -p tcp_brutal
 
-      - name: Configure (使用官方 x86 配置 + brutal)
+      - name: 配置 x86_64 + 只启用 Brutal
         run: |
-          # 下载官方 x86_64 config（或使用 make defconfig 后手动调整）
           wget -O .config https://downloads.openwrt.org/releases/24.10.6/targets/x86/64/config.buildinfo
-          
-          # 启用 TCP Brutal
+
           cat >> .config << EOF
+          CONFIG_TARGET_x86=y
+          CONFIG_TARGET_x86_64=y
+          CONFIG_TARGET_x86_64_Generic=y
           CONFIG_PACKAGE_kmod-tcp-brutal=y
-          CONFIG_TCP_BRUTAL=y  # 如果 Makefile 有对应选项
-          # 可选：其他优化
-          CONFIG_PACKAGE_luci=y
+          CONFIG_TCP_BRUTAL=m
           EOF
-          
+
           make defconfig
 
-      - name: Download packages & Build
-        run: |
-          make download -j$(nproc)
-          make -j$(nproc) V=s || make -j1 V=s  # 如果失败用单线程重试
+      - name: 编译内核（只生成模块所需）
+        run: make target/linux/compile -j$(nproc) || make target/linux/compile -j2 V=s
 
-      - name: Upload artifacts
+      - name: 只编译 Brutal 模块
+        run: make package/feeds/tcp_brutal/tcp-brutal/compile -j$(nproc) V=s
+
+      - name: 整理输出文件（只保留 Brutal 模块）
+        run: |
+          mkdir -p ./output
+          # 复制 ipk 安装包（推荐使用这个）
+          cp bin/targets/x86/64/packages/kmod-tcp-brutal*.ipk ./output/ 2>/dev/null || true
+          # 如果需要原始 .ko 文件
+          find build_dir -name "*brutal*.ko" -exec cp {} ./output/ \; 2>/dev/null || true
+          ls -lh ./output/
+
+      - name: 上传 Brutal 内核模块
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-x86-64-kernel-6.6.127-brutal
-          path: |
-            bin/targets/x86/64/*.img.gz
-            bin/targets/x86/64/*.squashfs
-            bin/targets/x86/64/packages/kmod-tcp-brutal*
+          name: kmod-tcp-brutal-x86_64-kernel-6.6.127
+          path: ./output/
           retention-days: 30
