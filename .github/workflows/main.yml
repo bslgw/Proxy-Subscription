@@ -1,68 +1,33 @@
-name: Build TCP Brutal Module Only (Minimal)
+include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
 
-on:
-  workflow_dispatch:
+PKG_NAME:=tcp-brutal
+PKG_VERSION:=1.0.3
+PKG_RELEASE:=1
 
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    steps:
-      - name: 安装构建依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gawk \
-            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
-            python3-setuptools rsync swig unzip zlib1g-dev file wget \
-            m4 libelf-dev libglib2.0-dev
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE_URL:=https://codeload.github.com/apernet/tcp-brutal/tar.gz/v$(PKG_VERSION)?
+PKG_HASH:=a52f004f70bba072c2d8bb3774071e91aab25d0fe33cd6a7b76e1d6d9e664a7f
 
-      - name: 检出 OpenWrt
-        uses: actions/checkout@v4
-        with:
-          repository: openwrt/openwrt
-          ref: v24.10.6
-          fetch-depth: 1
+PKG_LICENSE:=GPL-3.0
+PKG_LICENSE_FILES:=LICENSE
+PKG_MAINTAINER:=sbwml <admin@cooluc.com>
 
-      - name: 添加 TCP Brutal
-        run: |
-          ./scripts/feeds update -a
-          cat >> feeds.conf.default << EOF
-          src-git tcp_brutal https://github.com/sbwml/package_kernel_tcp-brutal.git
-          EOF
-          ./scripts/feeds update tcp_brutal
-          ./scripts/feeds install -a -p tcp_brutal
+include $(INCLUDE_DIR)/package.mk
 
-      - name: 最小化配置（只启用 Brutal）
-        run: |
-          wget -O .config https://downloads.openwrt.org/releases/24.10.6/targets/x86/64/config.buildinfo
-          cat >> .config << EOF
-          CONFIG_TARGET_x86=y
-          CONFIG_TARGET_x86_64=y
-          CONFIG_TARGET_x86_64_Generic=y
-          CONFIG_PACKAGE_kmod-tcp-brutal=y
-          CONFIG_TCP_BRUTAL=m
-          EOF
-          make defconfig
-          make prereq
+define KernelPackage/tcp-brutal
+  TITLE:=TCP Brutal congestion control
+  SUBMENU:=Network Support
+  FILES:= $(PKG_BUILD_DIR)/brutal.ko
+  AUTOLOAD:=$(call AutoProbe,brutal)
+endef
 
-      - name: 编译 Toolchain（必须）
-        run: make toolchain/install -j2 || make toolchain/install -j1 V=s
+define KernelPackage/tcp-brutal/Description
+  TCP Brutal is Hysteria's congestion control algorithm ported to TCP, as a Linux kernel module.
+endef
 
-      - name: 编译内核（必要步骤）
-        run: make target/linux/compile -j2 || make target/linux/compile -j1 V=s
+define Build/Compile
+	+$(KERNEL_MAKE) M=$(PKG_BUILD_DIR) modules
+endef
 
-      - name: 只编译 Brutal 模块
-        run: make package/feeds/tcp_brutal/tcp-brutal/compile -j2 V=s || make package/feeds/tcp_brutal/tcp-brutal/compile -j1 V=s
-
-      - name: 收集文件
-        run: |
-          mkdir -p ./output
-          cp bin/targets/x86/64/packages/kmod-tcp-brutal*.ipk ./output/ 2>/dev/null || true
-          find build_dir -name "*brutal*.ko" -exec cp {} ./output/ \; 2>/dev/null || true
-          ls -lh ./output/
-
-      - name: 上传结果
-        uses: actions/upload-artifact@v4
-        with:
-          name: kmod-tcp-brutal-x86_64-6.6.127
-          path: ./output/
-          retention-days: 30
+$(eval $(call KernelPackage,tcp-brutal))
