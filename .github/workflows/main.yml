@@ -47,35 +47,39 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-tcp-brutal=m" >> .config
           make defconfig
 
-      - name: Trigger SDK Env Prepare (💡 借鸡生蛋：强制初始化环境)
+      - name: Trigger SDK Env Prepare (💡 唤醒沉睡的编译器结构)
         run: |
           cd sdk
-          # 💡 让 SDK 自己把交叉编译器和内核源码树全部初始化出来，不要直接强行生啃
+          # 让 SDK 自己把内部的内核头文件和编译器目录解压并吐出来
           make package/feeds/brutal_feed/tcp-brutal/prepare V=s
 
-      - name: Advanced Cross-Compile (💡 精准降维打击)
+      - name: Hard Cross-Compile (💡 绝对路径合体爆破)
         run: |
-          # 1. 此时核心目录已经被 SDK 完美初始化，我们顺藤摸瓜抓出路径
-          KERNEL_DIR=$(find sdk/build_dir/ -maxdepth 3 -name "linux-6.6.*" | head -n 1)
-          TOOLCHAIN_BIN=$(find sdk/staging_dir/ -maxdepth 3 -name "bin" | grep "toolchain" | head -n 1)
+          # 1. 🔍 物理锁死官方 SDK 内部专用工具链二进制的绝对骨骼路径
+          TOOLCHAIN_BIN=$(find "$(pwd)/sdk/staging_dir/" -path "*/toolchain-*/bin" | head -n 1)
+          echo "🎯 抓到官方专用编译器藏身地: $TOOLCHAIN_BIN"
           
-          # 2. 注入全局变量并锁死官方专用编译器前缀
+          # 2. 强行把这个极为隐蔽的官方 bin 目录灌入系统血液，让命令行随时能找到它
           export PATH="$TOOLCHAIN_BIN:$PATH"
           export STAGING_DIR="$(pwd)/sdk/staging_dir"
           
-          # 3. 重新克隆一份干净的源码到外层，强制指派刚解压出的官方专用编译器和内核头文件进行物理轰击
+          # 3. 🔍 物理锁死官方解压出来的内核源码绝对路径
+          KERNEL_DIR=$(find "$(pwd)/sdk/build_dir/" -path "*/linux-6.6.*" | head -n 1)
+          echo "🎯 抓到官方内核源码路径: $KERNEL_DIR"
+          
+          # 4. 克隆源码，高歌猛进直接生啃编译！
           git clone https://github.com/apernet/tcp-brutal.git raw-src
           cd raw-src
-          make -C "../$KERNEL_DIR" M="$(pwd)" ARCH=x86_64 CROSS_COMPILE="x86_64-openwrt-linux-musl-" modules
+          make -C "$KERNEL_DIR" M="$(pwd)" ARCH=x86_64 CROSS_COMPILE="x86_64-openwrt-linux-musl-" modules
 
       - name: Collect Output Files
         run: |
           mkdir -p "$GITHUB_WORKSPACE/output_artifacts"
           
-          echo "=== 正在捞取完全对齐 musl 架构的 49KB 纯正驱动 ==="
+          echo "=== 正在精准提取生成的纯正 musl 架构 49KB 驱动 ==="
           cp -v "$GITHUB_WORKSPACE/raw-src/brutal.ko" "$GITHUB_WORKSPACE/output_artifacts/" || true
           
-          # 双重保险：如果系统偷偷塞进 bin 目录了，一起顺出来
+          # 双重保险：如果有打好的标准 ipk，顺便一块打包带走
           find "$GITHUB_WORKSPACE/sdk/bin/" -name "*brutal*.ipk" -exec cp -v {} "$GITHUB_WORKSPACE/output_artifacts/" \; || true
           
           echo "=== 成果盘点 ==="
