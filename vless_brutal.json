@@ -1,0 +1,49 @@
+#修改1
+{
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "singbox-vless-reality-brutal",
+      "listen": "::",
+      "listen_port": 21790,
+      "users": [
+        {
+          "id": "08e1e29d-4d37-4ecc-ad24-1535c35d886b",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "bbsok.cc.cd",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "bbsok.cc.cd",
+            "server_port": 38433
+          },
+          "private_key": "UKfvRm-OZHPjsF3zca20mIT5HcBchc_0KAiqbw4Ld2c",
+          "short_id": [
+            "6ba85179e30d4fc2"
+          ]
+        }
+      ],
+      "multiplex": {
+        "enabled": true,
+        "padding": true,
+        "brutal": {
+          "enabled": true,
+          "up_mbps": 100,
+          "down_mbps": 100
+        }
+      }
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "action": "sniff",
+        "timeout": "1s"
+      }
+    ]
+  }
+}
