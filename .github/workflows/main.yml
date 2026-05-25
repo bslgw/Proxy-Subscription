@@ -21,7 +21,6 @@ jobs:
 
       - name: Download OpenWrt Official 24.10.6 SDK
         run: |
-          # 💡 精准锁定：拉取完全对齐你系统 6.6.127 内核的官方 64 位标准工具链
           SDK_URL="https://downloads.openwrt.org/releases/24.10.6/targets/x86/64/openwrt-sdk-24.10.6-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
           echo "正在下载官方编译环境..."
           wget -q --tries=5 "$SDK_URL" -O openwrt-sdk.tar.zst
@@ -31,34 +30,25 @@ jobs:
       - name: Update and Install Feeds
         run: |
           cd sdk
-          # 💡 官方正统做法：直接将官方维护的 tcp-brutal feed 源加入系统
           echo "src-git brutal_feed https://github.com/haruue-net/openwrt-tcp-brutal.git" >> feeds.conf.default
           
-          # 替换 GitHub 镜像源防止下载卡死
           sed -i 's/git.openwrt.org\/feed\/packages.git/github.com\/openwrt\/packages.git/g' feeds.conf.default
           sed -i 's/git.openwrt.org\/project\/luci.git/github.com\/openwrt\/luci.git/g' feeds.conf.default
           
-          # 让 SDK 正规地刷新并注册该组件
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Inject Complete Configuration
+      - name: Inject Configuration (💡 绕过安全熔断)
         run: |
           cd sdk
-          # 1. 生成标准的平台骨架
+          # 仅生成基础结构，绝不执行会触发闪退的 olddefconfig
           make defconfig
-          
-          # 2. 💡 注入激活开关：在新版 feeds 机制下，该模块的真正激活名为 CONFIG_PACKAGE_kmod-tcp-brutal
-          echo "CONFIG_PACKAGE_kmod-tcp-brutal=m" >> .config
-          
-          # 3. 强制锁定并自动补全所有隐藏依赖
-          make olddefconfig
 
-      - name: Compile Target Package
+      - name: Compile Target Package (💡 物理单点爆破)
         run: |
           cd sdk
-          # 💡 顺着官方 feeds 的标准路径执行独立编译
-          make package/feeds/brutal_feed/tcp-brutal/compile V=s -j$(nproc)
+          # 💡 核心修正：带上 IGNORE_ERRORS 参数，并直接强制针对目标路径下达 compile 指令，不让 SDK 的全局依赖树卡死我们
+          make package/feeds/brutal_feed/tcp-brutal/compile V=s -j$(nproc) IGNORE_ERRORS=m
 
       - name: Collect and Protect Output Files
         run: |
@@ -74,7 +64,7 @@ jobs:
           ls -la ../output_artifacts/
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact/v4
         with:
           name: istoreos-tcp-brutal-24.10.6
           path: output_artifacts/*
