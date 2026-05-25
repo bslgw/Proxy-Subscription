@@ -30,10 +30,8 @@ jobs:
       - name: Update and Install Feeds
         run: |
           cd sdk
-          # 引入 tcp-brutal 官方 feed 源
           echo "src-git brutal_feed https://github.com/haruue-net/openwrt-tcp-brutal.git" >> feeds.conf.default
           
-          # 替换核心镜像源，避免下载死锁
           sed -i 's/git.openwrt.org\/feed\/packages.git/github.com\/openwrt\/packages.git/g' feeds.conf.default
           sed -i 's/git.openwrt.org\/project\/luci.git/github.com\/openwrt\/luci.git/g' feeds.conf.default
           
@@ -43,36 +41,34 @@ jobs:
       - name: Inject Configuration
         run: |
           cd sdk
-          # 强行把导致全局配置闪退的几个不相干的坏包从系统依赖里删掉
           sed -i '/kmod-phy-bcm-ns-usb/d' package/kernel/linux/Makefile
           sed -i '/onionshare-cli/d' feeds/packages/net/onionshare-cli/Makefile || true
           
-          # 写入目标组件激活开关
           echo "CONFIG_PACKAGE_kmod-tcp-brutal=m" >> .config
-          
-          # 让官方正规配置器跑完全程以锁定依赖
           make defconfig
 
       - name: Compile Target Package
         run: |
           cd sdk
-          # 顺着通过验证的 feeds 路径全速点火编译
           make package/feeds/brutal_feed/tcp-brutal/compile V=s -j$(nproc)
 
-      - name: Collect Output Files (💡 路径修正：精准对接最终产物库)
+      - name: Collect Output Files (💡 终极狂暴：全盘盲捞)
         run: |
           mkdir -p ../output_artifacts
           
-          echo "=== 正在前往 bin 目录打捞生成的官方标准安装包 ==="
-          # 💡 根据成功日志，直接去目标的 bin/targets 目录下精准提取打出来的完整安装包
-          find sdk/bin/targets/ -name "*brutal*.ipk" -exec cp {} ../output_artifacts/ \; || true
+          echo "=== 开启全盘穿透扫描（彻底无视相对路径屏障） ==="
+          # 💡 不管你在 sdk 还是 bin，直接从当前虚拟机的根目录 $GITHUB_WORKSPACE 开始全盘搜寻 ipk
+          find "$GITHUB_WORKSPACE" -type f -name "*brutal*.ipk" -exec cp -v {} ../output_artifacts/ \; || true
           
-          echo "=== 最终打包区产物审查 ==="
+          echo "=== 双重保险：顺便盲捞可能残留下来的内核驱动 .ko ==="
+          find "$GITHUB_WORKSPACE" -type f -name "*brutal*.ko" -exec cp -v {} ../output_artifacts/ \; || true
+          
+          echo "=== 收网现场盘点 ==="
           ls -la ../output_artifacts/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: istoreos-tcp-brutal-24.10.6
-          path: output_artifacts/*
+          path: output_artifacts/
           if-no-files-found: error
