@@ -1,5 +1,5 @@
 name: Build TCP-Brutal
-on: [workflow_dispatch] # 手动触发
+on: [workflow_dispatch]
 
 jobs:
   build:
@@ -9,33 +9,53 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: openwrt/openwrt
-          ref: v23.05.5 # 确保版本与你固件的内核版本匹配
+          ref: v23.05.5 # 确保版本匹配你的内核
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3-distutils
 
-      - name: Inject TCP-Brutal Source
+      - name: Setup Feeds and Packages
         run: |
-          # 将 Hysteria 官方仓库的代码克隆到 package 目录，作为内置模块编译
-          git clone https://github.com/apernet/tcp-brutal package/tcp-brutal
+          # 1. 初始化 feeds
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          
+          # 2. 引入针对 OpenWrt 封装好的 tcp-brutal
+          # 使用已经包含 Makefile 封装的仓库，这样 OpenWrt 才能识别它
+          git clone https://github.com/sbwml/openwrt-tcp-brutal package/tcp-brutal
+          
+          # 3. 再次运行 install 以处理新加入的包依赖
+          ./scripts/feeds install -a
 
-      - name: Configure and Build
+      - name: Configure Build
         run: |
-          # 1. 初始化配置文件
+          # 创建一个最小化的配置文件
           make defconfig
           
-          # 2. 启用 TCP-Brutal (模块化编译)
-          # 注意：Brutal 是内核模块，必须选择为 'm'
+          # 显式开启编译 (m 代表编译为模块)
           echo "CONFIG_PACKAGE_kmod-tcp-brutal=m" >> .config
-          make defconfig
+          echo "CONFIG_PACKAGE_tcp-brutal=m" >> .config
           
-          # 3. 编译
-          # 仅编译该模块及其必须的内核依赖，避免全量编译
+          # 重新应用配置
+          make defconfig
+
+      - name: Compile
+        run: |
+          # 重点：指定完整路径编译
+          # 只要上面成功了，这里就不会再报错 'No rule to make target'
           make package/tcp-brutal/compile V=s -j$(nproc)
 
       - name: Collect IPK
         run: |
           # 查找生成的 ipk 文件
-          find bin/packages -name "*.ipk"
+          mkdir -p bin/packages_final
+          find bin/packages -name "*.ipk" -exec cp {} bin/packages_final/ \;
+          ls -lh bin/packages_final/
+
+      - name: Upload IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tcp-brutal-ipk
+          path: bin/packages_final/*.ipk
