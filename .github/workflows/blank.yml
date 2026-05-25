@@ -1,0 +1,40 @@
+name: Build TCP-Brutal
+
+on:
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev libelf-dev swig
+
+      - name: Download and Setup SDK
+        run: |
+          # 请根据你的 OpenWrt 版本修改以下链接，确保 SDK 版本与内核 6.6.127 匹配
+          SDK_URL="https://downloads.openwrt.org/snapshots/targets/x86/64/openwrt-sdk-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
+          wget $SDK_URL -O sdk.tar.xz
+          tar -xf sdk.tar.xz --strip-components=1
+          
+      - name: Prepare Feeds
+        run: |
+          echo "src-git tcp_brutal https://github.com/haruue-net/openwrt-tcp-brutal.git;master" >> feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install tcp-brutal
+
+      - name: Compile
+        run: |
+          make defconfig
+          make package/feeds/tcp_brutal/tcp-brutal/compile V=s
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmod-brutal
+          path: bin/targets/x86/64/packages/kmod-brutal_*.ipk
