@@ -3,9 +3,6 @@ name: Build-iStoreOS-Brutal
 on:
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -22,48 +19,39 @@ jobs:
       - name: Download OpenWrt Official 24.10.6 SDK
         run: |
           SDK_URL="https://downloads.openwrt.org/releases/24.10.6/targets/x86/64/openwrt-sdk-24.10.6-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          echo "正在下载官方 24.10.6 编译环境..."
           wget -q --tries=5 "$SDK_URL" -O openwrt-sdk.tar.zst
           tar -I zstd -xf openwrt-sdk.tar.zst
           mv openwrt-sdk-* sdk
 
-      - name: Update and Install Feeds
+      - name: Clone Raw Source Code
         run: |
-          cd sdk
-          echo "src-git brutal_feed https://github.com/haruue-net/openwrt-tcp-brutal.git" >> feeds.conf.default
-          
-          sed -i 's/git.openwrt.org\/feed\/packages.git/github.com\/openwrt\/packages.git/g' feeds.conf.default
-          sed -i 's/git.openwrt.org\/project\/luci.git/github.com\/openwrt\/luci.git/g' feeds.conf.default
-          
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # 💡 核心操作：直接拉取最底层的 brutal 纯 C 语言源码仓库
+          git clone https://github.com/apernet/tcp-brutal.git raw-src
 
-      - name: Inject Configuration
+      - name: Hard Cross-Compile (💡 纯物理强行编译)
         run: |
-          cd sdk
-          sed -i '/kmod-phy-bcm-ns-usb/d' package/kernel/linux/Makefile
-          sed -i '/onionshare-cli/d' feeds/packages/net/onionshare-cli/Makefile || true
+          # 1. 自动定位 SDK 里的内核源码夹和编译器
+          KERNEL_DIR=$(find sdk/build_dir/ -maxdepth 3 -name "linux-6.6.*" | head -n 1)
+          TOOLCHAIN_BIN=$(find sdk/staging_dir/ -maxdepth 3 -name "bin" | grep "toolchain" | head -n 1)
+          CROSS_COMPILE_PREFIX=$(find $TOOLCHAIN_BIN -name "x86_64-openwrt-linux-musl-gcc" | sed 's/gcc//g')
           
-          echo "CONFIG_PACKAGE_kmod-tcp-brutal=m" >> .config
-          make defconfig
+          export PATH="$TOOLCHAIN_BIN:$PATH"
+          export STAGING_DIR="$(pwd)/sdk/staging_dir"
+          
+          # 2. 💡 绝杀：直接让内核编译器在源码目录硬生生编译出真正的驱动文件，没有任何打包工具能拦截它！
+          cd raw-src
+          make -C "../$KERNEL_DIR" M="$(pwd)" ARCH=x86_64 CROSS_COMPILE="$CROSS_COMPILE_PREFIX" modules
 
-      - name: Compile Target Package
+      - name: Collect Output Files
         run: |
-          cd sdk
-          make package/feeds/brutal_feed/tcp-brutal/compile V=s -j$(nproc)
-
-      - name: Collect Output Files (💡 物理绝杀：全系统穿透打捞)
-        run: |
-          # 建立项目内的标准收集夹
-          mkdir -p "$GITHUB_WORKSPACE/output_artifacts"
+          mkdir -p ../output_artifacts
           
-          echo "=== 🚨 正在对整台 Actions 虚拟机进行地毯式大扫除 🚨 ==="
-          # 💡 核心改动：直接从虚拟机根目录 / 开始扫描，彻底打破任何路径气泡、软链接或隐藏临时目录！
-          # 同时使用 -user runner 限制范围，加快扫描速度并避开系统保护目录
-          find /home/runner/ -type f \( -name "*brutal*.ipk" -o -name "*brutal*.ko" \) -exec cp -v {} "$GITHUB_WORKSPACE/output_artifacts/" \; || true
+          echo "=== 正在捞取纯正的 49KB 内核驱动文件 ==="
+          # 💡 这次我们只拿最纯粹的内核模块驱动
+          find raw-src/ -name "brutal.ko" -exec cp -v {} ../output_artifacts/ \;
           
-          echo "=== 检查最终成果（只要这里有文件，就绝对能上传成功） ==="
-          ls -la "$GITHUB_WORKSPACE/output_artifacts/"
+          echo "=== 检查成果清单 ==="
+          ls -la ../output_artifacts/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
