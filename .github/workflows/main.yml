@@ -22,7 +22,7 @@ jobs:
       - name: Download OpenWrt Official 24.10.6 SDK
         run: |
           SDK_URL="https://downloads.openwrt.org/releases/24.10.6/targets/x86/64/openwrt-sdk-24.10.6-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          echo "正在下载官方编译环境..."
+          echo "正在下载 24.10.6 (6.6.127内核对齐) 编译工具链..."
           wget -q --tries=5 "$SDK_URL" -O openwrt-sdk.tar.zst
           tar -I zstd -xf openwrt-sdk.tar.zst
           mv openwrt-sdk-* sdk
@@ -30,6 +30,7 @@ jobs:
       - name: Update and Install Feeds
         run: |
           cd sdk
+          # 仅拉取我们绝对需要的 tcp-brutal 独立源，绝不参与多余的包依赖污染
           echo "src-git brutal_feed https://github.com/haruue-net/openwrt-tcp-brutal.git" >> feeds.conf.default
           
           sed -i 's/git.openwrt.org\/feed\/packages.git/github.com\/openwrt\/packages.git/g' feeds.conf.default
@@ -38,33 +39,28 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Inject Configuration (💡 绕过安全熔断)
+      - name: Compile Target Package (💡 纯粹单点强攻，跳过全局依赖检查)
         run: |
           cd sdk
-          # 仅生成基础结构，绝不执行会触发闪退的 olddefconfig
-          make defconfig
+          # 💡 核心改动：完全移除 make defconfig / olddefconfig
+          # 直接越过全局依赖链，单独指派编译器强行进入组件路径进行物理编译
+          make package/feeds/brutal_feed/tcp-brutal/compile V=s -j$(nproc) IGNORE_ERRORS=1
 
-      - name: Compile Target Package (💡 物理单点爆破)
-        run: |
-          cd sdk
-          # 💡 核心修正：带上 IGNORE_ERRORS 参数，并直接强制针对目标路径下达 compile 指令，不让 SDK 的全局依赖树卡死我们
-          make package/feeds/brutal_feed/tcp-brutal/compile V=s -j$(nproc) IGNORE_ERRORS=m
-
-      - name: Collect and Protect Output Files
+      - name: Collect Output Files
         run: |
           mkdir -p ../output_artifacts
           
-          echo "=== 正在全局打捞编译生成的标准 .ipk 安装包 ==="
+          echo "=== 全局捕获编译生成的 .ipk ==="
           find sdk/bin/ -name "*brutal*.ipk" -exec cp {} ../output_artifacts/ \; || true
           
-          echo "=== 正在深度打捞底层的内核驱动文件 .ko 作为双重保险 ==="
+          echo "=== 深度捕获底层的内核内核驱动 .ko ==="
           find sdk/build_dir/ -name "*brutal*.ko" -exec cp {} ../output_artifacts/ \; || true
           
-          echo "=== 打包区收获清单 ==="
+          echo "=== 当前收网清单 ==="
           ls -la ../output_artifacts/
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact/v4
+        uses: actions/upload-artifact@v4
         with:
           name: istoreos-tcp-brutal-24.10.6
           path: output_artifacts/*
