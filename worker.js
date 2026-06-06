@@ -105,7 +105,6 @@ export default {
       request.method === "POST" &&
       url.pathname === "/api/delete"
     ) {
-      // 兼容可能从 URL 传来的 token
       if (url.searchParams.get("token") !== TOKEN) {
         return new Response("Forbidden", { status: 403 });
       }
@@ -120,7 +119,36 @@ export default {
     }
 
     // ----------------------------------------------------
-    // API 路由 3: 客户端纯文本订阅下发 (如给客户端软件拉取)
+    // 新增 API 路由: 切换节点禁用/启用状态
+    // ----------------------------------------------------
+    if (
+      request.method === "POST" &&
+      url.pathname === "/api/toggle-disable"
+    ) {
+      if (url.searchParams.get("token") !== TOKEN) {
+        return new Response("Forbidden", { status: 403 });
+      }
+
+      const { link, disable } = await request.json();
+      if (!link) return new Response("invalid data", { status: 400 });
+
+      const rawDisabled = await env.NODES_STORE.get("disabled_links");
+      let disabledLinks = rawDisabled ? JSON.parse(rawDisabled) : [];
+
+      if (disable) {
+        if (!disabledLinks.includes(link)) {
+          disabledLinks.push(link);
+        }
+      } else {
+        disabledLinks = disabledLinks.filter(l => l !== link);
+      }
+
+      await env.NODES_STORE.put("disabled_links", JSON.stringify(disabledLinks));
+      return Response.json({ success: true });
+    }
+
+    // ----------------------------------------------------
+    // API 路由 3: 客户端纯文本订阅下发 (排除已禁用节点)
     // ----------------------------------------------------
     if (url.pathname === "/sub") {
       if (url.searchParams.get("token") !== TOKEN) {
@@ -129,10 +157,17 @@ export default {
 
       const raw = await env.NODES_STORE.get("servers");
       const servers = raw ? JSON.parse(raw) : [];
+      
+      const rawDisabled = await env.NODES_STORE.get("disabled_links");
+      const disabledLinks = rawDisabled ? JSON.parse(rawDisabled) : [];
+
       const output = [];
       for (const server of servers) {
         for (const link of server.links || []) {
-          output.push(link);
+          // 只有不在禁用列表里的节点才下发
+          if (!disabledLinks.includes(link)) {
+            output.push(link);
+          }
         }
       }
 
@@ -142,23 +177,19 @@ export default {
     }
 
     // ----------------------------------------------------
-    // 🔑 核心安全拦截屏障：Web UI 访问控制 (已加入 Cookie 校验防止闪烁)
+    // 🔑 核心安全拦截屏障：Web UI 访问控制
     // ----------------------------------------------------
     const clientToken = url.searchParams.get("token");
     const headerToken = request.headers.get("X-Access-Token");
     
-    // 解析 Cookie 
     const cookieHeader = request.headers.get("Cookie") || "";
     const cookieToken = cookieHeader.match(/(?:^|; )node_manager_token=([^;]*)/)?.[1];
     
-    // 如果 URL参数、Header、Cookie 均无正确密码，则判定为【未登录状态】
     if (clientToken !== TOKEN && headerToken !== TOKEN && cookieToken !== TOKEN) {
-      
       if (request.headers.get("X-Requested-With") === "XMLHttpRequest") {
         return Response.json({ success: false, msg: "访问密码错误！" }, { status: 401 });
       }
 
-      // 下发没有携带任何节点数据的“密码锁网页”
       return new Response(`
 <!DOCTYPE html>
 <html>
@@ -206,7 +237,6 @@ async function fetchDataAndRender(token) {
   });
   if(res.ok) {
     localStorage.setItem('node_manager_token', token);
-    // 写入 Cookie 保持登录状态，过期时间 1 年
     document.cookie = "node_manager_token=" + token + "; path=/; max-age=31536000; SameSite=Strict";
     const html = await res.text();
     document.open();
@@ -230,6 +260,9 @@ async function fetchDataAndRender(token) {
     // ----------------------------------------------------
     const raw = await env.NODES_STORE.get("servers");
     const servers = raw ? JSON.parse(raw) : [];
+
+    const rawDisabled = await env.NODES_STORE.get("disabled_links");
+    const disabledLinks = rawDisabled ? JSON.parse(rawDisabled) : [];
 
     const processedServers = servers.map(s => {
       const groups = {};
@@ -269,7 +302,6 @@ body { margin: 0; padding: 20px; background: #f8fafc; color: #334155; font-famil
 .card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 
-/* 优化 1：去掉整体的不可选中限制，允许对服务器名文本块单独选择 */
 .server-info-zone { cursor: pointer; flex: 1; }
 .server-name { font-size: 18px; font-weight: 700; color: #1e293b; transition: color 0.15s; user-select: text; }
 .server-info-zone:hover .server-name { color: #2563eb; }
@@ -286,10 +318,18 @@ body { margin: 0; padding: 20px; background: #f8fafc; color: #334155; font-famil
 
 .links-container { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; flex-direction: column; gap: 8px; }
 .links-container.active { display: flex; }
-.link-item { display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #f1f5f9; border-radius: 8px; padding: 10px 12px; }
+.link-item { display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #f1f5f9; border-radius: 8px; padding: 10px 12px; transition: opacity 0.2s; }
+.link-item.disabled-status { opacity: 0.55; background: #f1f5f9; border-color: #e2e8f0; }
+.link-item.disabled-status .link-text { text-decoration: line-through; color: #94a3b8; }
 .link-text { flex: 1; color: #475569; font-size: 13px; word-break: break-all; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .copy-small { flex-shrink: 0; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #334155; font-size: 11px; font-weight: 600; cursor: pointer; }
 .copy-small:hover { background: #f1f5f9; border-color: #94a3b8; }
+
+.btn-toggle-disable { flex-shrink: 0; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #64748b; font-size: 11px; font-weight: 600; cursor: pointer; }
+.btn-toggle-disable:hover { background: #fee2e2; color: #ef4444; border-color: #fca5a5; }
+.btn-toggle-disable.is-disabled { background: #ef4444; color: white; border-color: #ef4444; }
+.btn-toggle-disable.is-disabled:hover { background: #dc2626; }
 </style>
 </head>
 <body>
@@ -335,16 +375,22 @@ body { margin: 0; padding: 20px; background: #f8fafc; color: #334155; font-famil
 
         ${protocols.map(proto => `
           <div id="panel-${sIdx}-${proto}" class="links-container">
-            ${s.groups[proto].map(l => `
-              <div class="link-item">
+            ${s.groups[proto].map(l => {
+              const isDisabled = disabledLinks.includes(l);
+              return `
+              <div class="link-item ${isDisabled ? 'disabled-status' : ''}">
                 <div class="link-text" title="${escapeHtml(displayNodeLink(l))}">
                   ${escapeHtml(displayNodeLink(l))}
                 </div>
                 <button class="copy-small" onclick="copyLink(\`${l.replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$')}\`, this, event)">
                   复制
                 </button>
+                <button class="btn-toggle-disable ${isDisabled ? 'is-disabled' : ''}" onclick="toggleDisableNode(\`${l.replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$')}\`, ${!isDisabled}, this, event)">
+                  ${isDisabled ? '已禁用' : '禁用'}
+                </button>
               </div>
-            `).join("")}
+              `;
+            }).join("")}
           </div>
         `).join("")}
       </div>
@@ -361,7 +407,6 @@ function copySub(){
   alert("订阅链接已复制到剪贴板");
 }
 
-// 优化：增强了 copyLink 函数，支持 event 阻止事件冒泡防止折叠卡片
 async function copyLink(text, btn, event){
   if(event) event.stopPropagation(); 
   try {
@@ -401,9 +446,35 @@ function collapseAllInCard(cardIdx) {
   }
 }
 
+async function toggleDisableNode(link, shouldDisable, btnEl, event) {
+  if(event) event.stopPropagation();
+  const token = localStorage.getItem('node_manager_token') || '';
+  
+  btnEl.disabled = true;
+  btnEl.innerText = "处理中...";
+
+  try {
+    const res = await fetch("/api/toggle-disable?token=" + encodeURIComponent(token), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ link: link, disable: shouldDisable })
+    });
+    if(res.ok){
+      // 成功后直接刷新页面刷新节点显示状态
+      location.reload();
+    }else{
+      alert("操作失败，请检查登录状态");
+      btnEl.disabled = false;
+      btnEl.innerText = shouldDisable ? '禁用' : '已禁用';
+    }
+  } catch(e) {
+    alert("网络请求失败");
+    btnEl.disabled = false;
+  }
+}
+
 async function deleteServer(serverId){
   if(!confirm("确定要删除服务器 " + serverId + " 吗?")) return;
-  // 从 localStorage 或 cookie 中提取凭证
   const token = localStorage.getItem('node_manager_token') || '';
   const res = await fetch("/api/delete?token=" + encodeURIComponent(token), {
     method: "POST",
@@ -419,7 +490,6 @@ async function deleteServer(serverId){
 
 function logout() {
   localStorage.removeItem('node_manager_token');
-  // 退出时清除 Cookie
   document.cookie = "node_manager_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
   location.reload();
 }
@@ -429,7 +499,6 @@ function logout() {
 `, { 
       headers: { 
         "content-type": "text/html;charset=utf-8",
-        // 优化 2：下发页面时在后端同步种入 Cookie，保障后续请求一步到位不闪烁
         "Set-Cookie": `node_manager_token=${TOKEN}; Path=/; Max-Age=31536000; SameSite=Strict`
       } 
     });
